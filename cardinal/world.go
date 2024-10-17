@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"os/signal"
 	"sync/atomic"
@@ -200,6 +201,7 @@ func (w *World) CurrentTick() uint64 {
 // doTick performs one game tick. This consists of taking a snapshot of all pending transactions, then calling
 // each system in turn with the snapshot of transactions.
 func (w *World) doTick(ctx context.Context, timestamp uint64) (err error) {
+	fmt.Println("doTick")
 	ctx, span := w.tracer.Start(ddotel.ContextWithStartOptions(ctx, ddtracer.Measured()), "world.tick")
 	defer span.End()
 
@@ -212,41 +214,45 @@ func (w *World) doTick(ctx context.Context, timestamp uint64) (err error) {
 	if w.worldStage.Current() != worldstage.Recovering &&
 		w.worldStage.Current() != worldstage.Running &&
 		w.worldStage.Current() != worldstage.ShuttingDown {
+		fmt.Println("world is not in a valid state to tick")
 		err := eris.Errorf("world is not in a valid state to tick %s", w.worldStage.Current())
 		span.SetStatus(codes.Error, eris.ToString(err, true))
 		span.RecordError(err)
 		return err
 	}
+	fmt.Println("world is in a valid state to tick")
 
 	// This defer is here to catch any panics that occur during the tick. It will log the current tick and the
 	// current system that is running.
 	defer w.handleTickPanic()
-
+	fmt.Println("handleTickPanic")
 	// Copy the transactions from the pool so that we can safely modify the pool while the tick is running.
 	txPool := w.txPool.CopyTransactions(ctx)
-
+	fmt.Println("txPool")
 	// Store the timestamp for this tick
 	w.timestamp.Store(timestamp)
-
+	fmt.Println("timestamp")
 	// Create the engine context to inject into systems
 	wCtx := newWorldContextForTick(w, txPool)
-
+	fmt.Println("wCtx")
 	// Run all registered systems.
 	// This will run the registered init systems if the current tick is 0
 	if err := w.SystemManager.runSystems(ctx, wCtx); err != nil {
+		fmt.Println("runSystems ERROR")
 		span.SetStatus(codes.Error, eris.ToString(err, true))
 		span.RecordError(err)
 		return err
 	}
 
 	if err := w.entityStore.FinalizeTick(ctx); err != nil {
+		fmt.Println("FinalizeTick ERROR")
 		span.SetStatus(codes.Error, eris.ToString(err, true))
 		span.RecordError(err)
 		return err
 	}
-
+	fmt.Println("FinalizeTick")
 	w.setEvmResults(txPool.GetEVMTxs())
-
+	fmt.Println("setEvmResults")
 	// Handle tx data blob submission
 	// Only submit transactions when the following criteria is satisfied:
 	// 1. The shard router is set
@@ -254,12 +260,13 @@ func (w *World) doTick(ctx context.Context, timestamp uint64) (err error) {
 	if w.router != nil && w.worldStage.Current() != worldstage.Recovering {
 		err := w.router.SubmitTxBlob(ctx, txPool.Transactions(), w.tick.Load(), w.timestamp.Load())
 		if err != nil {
+			fmt.Println("SubmitTxBlob ERROR")
 			span.SetStatus(codes.Error, eris.ToString(err, true))
 			span.RecordError(err)
 			return eris.Wrap(err, "failed to submit transactions to base shard")
 		}
 	}
-
+	fmt.Println("SubmitTxBlob")
 	// Increment the tick
 	w.tick.Add(1)
 	w.receiptHistory.NextTick() // todo(scott): use channels
