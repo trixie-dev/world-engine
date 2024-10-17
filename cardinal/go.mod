@@ -1,4 +1,4 @@
-module pkg.world.dev/world-engine/cardinal
+module github.com/trixie-dev/world-engine/cardinal
 
 go 1.22.1
 
